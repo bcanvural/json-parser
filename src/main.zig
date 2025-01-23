@@ -7,30 +7,29 @@ const Error = error{
     InvalidJsonError,
     StringConcatMemoryError,
 };
-fn process_object(str: *[]const u8, idx: *usize) Error!void {
-    // var closed = false;
-    // TODO walk inside passed string, probably via slices? idx should move hence a ptr
-    // const ally = std.heap.page_allocator;
-    // var concat_list = std.ArrayList(u8).init(ally);
-    // defer concat_list.deinit();
-    //
-    // print("HELLO", .{});
-    // for (str) |token| {
-    //     print("token: {s}\n", .{token});
-    //     if (token[0] == '}') {
-    //         closed = true;
-    //     }
-    //     concat_list.append(token[0]) catch {
-    //         return Error.StringConcatMemoryError;
-    //     };
-    // }
-    // const concatted = concat_list.toOwnedSlice() catch {
-    //     return Error.StringConcatMemoryError;
-    // };
-    // print("{s}\n", .{concatted});
-    // if (!closed) {
-    //     return Error.InvalidJsonError;
-    // }
+fn process_value(str: []const u8, idx: usize) Error!void {
+    //consume value
+    var closed = false;
+    var local_idx: usize = 0;
+    // TODO debug: collect until next "
+    const allocator = std.heap.page_allocator;
+    while (str[local_idx] != '\"') {}
+}
+fn process_object(str: []const u8, idx: usize) Error!void {
+    //consume "closing bracket"
+    var closed = false;
+    var local_idx: usize = idx;
+    for (str[idx..]) |ch| {
+        switch (ch) {
+            '}' => closed = true,
+            '"' => process_value(str, local_idx),
+            else => {},
+        }
+        local_idx += 1;
+    }
+    if (!closed) {
+        return Error.InvalidJsonError;
+    }
     return;
 }
 
@@ -47,7 +46,7 @@ pub fn parse_json(str: []u8) Error!void {
     for (str) |ch| {
         print("{c}\n", .{ch});
         switch (ch) {
-            '{' => try process_object(&str, &idx),
+            '{' => try process_object(str, idx),
             else => print("else\n", .{}),
         }
         idx = idx + 1;
