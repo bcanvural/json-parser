@@ -8,30 +8,47 @@ const Error = error{
     InvalidJsonError,
     StringConcatMemoryError,
 };
-fn process_value(str: []const u8, idx: usize) Error!void {
+fn process_value(str: []const u8, idx: *usize) Error!void {
     //consume value
-    // var closed = false;
-    var local_idx: usize = idx;
-    //TODO debug: collect until next "
-    const allocator = std.heap.page_allocator;
-    var str_collector = collector.Collector.init(allocator);
-    while (str[local_idx] != '\"') {
-        str_collector.add(str[local_idx]) catch return Error.StringConcatMemoryError;
-        local_idx += 1;
+    var closed = false;
+    const ally = std.heap.page_allocator;
+    var str_collector = collector.init(ally);
+    defer str_collector.deinit();
+    while (idx.* < str.len) {
+        const ch = str[idx.*];
+        idx.* += 1;
+        switch (ch) {
+            '"' => {
+                closed = true;
+                break;
+            },
+            else => {
+                print("Inside else in process_value!\n", .{});
+                str_collector.add(ch) catch return error.StringConcatMemoryError;
+            },
+        }
     }
-    print("collected: {s}\n", .{str_collector.array_list.toOwnedSlice() catch return Error.StringConcatMemoryError});
+    if (!closed) {
+        return Error.InvalidJsonError;
+    }
+    print("Printing collected value: {s}\n", .{str_collector.array_list.toOwnedSlice() catch return Error.StringConcatMemoryError});
 }
-fn process_object(str: []const u8, idx: usize) Error!void {
+fn process_object(str: []const u8, idx: *usize) Error!void {
     //consume "closing bracket"
     var closed = false;
-    var local_idx: usize = idx;
-    for (str[idx..]) |ch| {
+    while (idx.* < str.len) {
+        const ch = str[idx.*];
+        idx.* += 1;
         switch (ch) {
-            '}' => closed = true,
-            '"' => try process_value(str, local_idx),
+            '}' => {
+                closed = true;
+                break;
+            },
+            '"' => {
+                try process_value(str, idx);
+            },
             else => {},
         }
-        local_idx += 1;
     }
     if (!closed) {
         return Error.InvalidJsonError;
@@ -49,13 +66,16 @@ pub fn parse_json(str: []u8) Error!void {
     defer st.deinit();
 
     var idx: usize = 0;
-    for (str) |ch| {
-        print("{c}\n", .{ch});
+    while (idx < str.len) {
+        const ch = str[idx];
+        idx += 1;
         switch (ch) {
-            '{' => try process_object(str, idx),
+            '{' => {
+                try process_object(str, &idx);
+                continue;
+            },
             else => print("else\n", .{}),
         }
-        idx = idx + 1;
     }
 }
 pub fn main() !void {
