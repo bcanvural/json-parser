@@ -2,12 +2,23 @@ const std = @import("std");
 const fs = std.fs;
 const stack = @import("stack.zig");
 const collector = @import("collector.zig");
+const syntaxtree = @import("syntraxtree.zig").SyntaxTree;
 const print = std.debug.print;
 
 const Error = error{
     InvalidJsonError,
     StringConcatMemoryError,
+    TreeAllocError,
 };
+
+const Token = union(enum) {
+    Object,
+    KeyField,
+    ValueField,
+    Array,
+    Root,
+};
+
 fn process_value(str: []const u8, idx: *usize) Error!void {
     //consume value
     var closed = false;
@@ -62,8 +73,8 @@ pub fn parse_json(str: []u8) Error!void {
     }
 
     const ally = std.heap.page_allocator;
-    var st = stack.Stack.init(ally);
-    defer st.deinit();
+    var tree = syntaxtree(Token).new(ally, "root") catch return Error.TreeAllocError;
+    tree.print_tr();
 
     var idx: usize = 0;
     while (idx < str.len) {
