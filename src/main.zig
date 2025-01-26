@@ -1,30 +1,16 @@
 const std = @import("std");
 const fs = std.fs;
-const stack = @import("stack.zig");
-const collector = @import("collector.zig");
-const syntaxtree = @import("syntraxtree.zig").SyntaxTree;
+const Syntaxtree = @import("syntraxtree.zig");
 const print = std.debug.print;
 
 const Error = error{
     InvalidJsonError,
-    StringConcatMemoryError,
     TreeAllocError,
-};
-
-const Token = union(enum) {
-    Object,
-    KeyField,
-    ValueField,
-    Array,
-    Root,
 };
 
 fn process_value(str: []const u8, idx: *usize) Error!void {
     //consume value
     var closed = false;
-    const ally = std.heap.page_allocator;
-    var str_collector = collector.init(ally);
-    defer str_collector.deinit();
     while (idx.* < str.len) {
         const ch = str[idx.*];
         idx.* += 1;
@@ -35,16 +21,14 @@ fn process_value(str: []const u8, idx: *usize) Error!void {
             },
             else => {
                 print("Inside else in process_value!\n", .{});
-                str_collector.add(ch) catch return error.StringConcatMemoryError;
             },
         }
     }
     if (!closed) {
         return Error.InvalidJsonError;
     }
-    print("Printing collected value: {s}\n", .{str_collector.array_list.toOwnedSlice() catch return Error.StringConcatMemoryError});
 }
-fn process_object(str: []const u8, idx: *usize) Error!void {
+fn process_object(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
     //consume "closing bracket"
     var closed = false;
     while (idx.* < str.len) {
@@ -73,7 +57,7 @@ pub fn parse_json(str: []u8) Error!void {
     }
 
     const ally = std.heap.page_allocator;
-    var tree = syntaxtree(Token).new(ally, "root") catch return Error.TreeAllocError;
+    var tree = Syntaxtree.new(ally, Syntaxtree.Token.Object) catch return Error.TreeAllocError;
     tree.print_tr();
 
     var idx: usize = 0;
@@ -82,7 +66,11 @@ pub fn parse_json(str: []u8) Error!void {
         idx += 1;
         switch (ch) {
             '{' => {
-                try process_object(str, &idx);
+                try process_object(
+                    str,
+                    &idx,
+                    tree.root.?,
+                );
                 continue;
             },
             else => print("else\n", .{}),
@@ -111,7 +99,7 @@ test "step1/invalid.json" {
     var err_returned = false;
     parse_json(invalid_json) catch |err| switch (err) {
         Error.InvalidJsonError => err_returned = true,
-        Error.StringConcatMemoryError => return err,
+        else => return err,
     };
     try std.testing.expect(err_returned);
 }
