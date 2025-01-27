@@ -6,8 +6,8 @@ const Self = @This();
 list: std.ArrayList(u8),
 allocator: std.mem.Allocator,
 
-pub fn new(allocator: std.mem.Allocator) !Self {
-    const list = try std.ArrayList(u8).init(allocator);
+pub fn new(allocator: std.mem.Allocator) Self {
+    const list = std.ArrayList(u8).init(allocator);
     return .{
         .allocator = allocator,
         .list = list,

@@ -28,32 +28,33 @@ pub fn new(allocator: std.mem.Allocator, root_val: Token) !Self {
 //assuming parent is not null
 pub fn lazyAddNode(self: *Self, parent: *Node, token: Token) !void {
     const child = try self.allocator.create(Node);
-    if (parent.children) |children| {
-        children.append(child);
+    child.* = Node{ .children = null, .value = token };
+    if (parent.children) |*children| {
+        try children.append(child);
     } else {
-        parent.children = try std.ArrayList(token).init(self.allocator);
-        parent.children.?.append(child);
+        parent.children = std.ArrayList(*Node).init(self.allocator);
+        try parent.children.?.append(child);
     }
 }
 
 pub fn print_tr(self: *Self) void {
     if (self.root) |root| {
-        print_node(root);
+        print_node(root, 0);
     } else {
         print("Tree is empty\n", .{});
     }
 }
 
-fn print_node(node: *Node) void {
+fn print_node(node: *Node, level: i32) void {
     switch (node.value) {
-        Token.Object => print("Object\n", .{}),
-        Token.KeyField => print("KeyField\n", .{}),
-        Token.ValueField => print("ValueField\n", .{}),
-        Token.Array => print("Array\n", .{}),
+        Token.Object => print("Level: {d}, Object\n", .{level}),
+        Token.KeyField => print("Level: {d}, KeyField\n", .{level}),
+        Token.ValueField => print("Level: {d}, ValueField\n", .{level}),
+        Token.Array => print("Level: {d}, Array\n", .{level}),
     }
     if (node.children) |children| {
-        for (children) |child| {
-            print_node(child);
+        for (children.items) |child| {
+            print_node(child, level + 1);
         }
     }
 }
