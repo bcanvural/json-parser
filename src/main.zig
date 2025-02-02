@@ -10,25 +10,61 @@ const Error = error{
     ConcatError,
 };
 
-fn process_value(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
+fn sanity_check() void {
+    var closed = false;
+    const str: []const u8 = "hello";
+    for (str) |ch| {
+        switch (ch) {
+            'e' => closed = true,
+            else => print("nothing\n", .{}),
+        }
+    }
+    if (!closed) {
+        print("not closed!\n", .{});
+    }
+}
+fn find_colon(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
+    //consume : or exit with invalidjson error
+    var closed = false;
+    loop: while (idx.* < str.len) {
+        const ch = str[idx.*];
+        idx.* += 1;
+        switch (ch) {
+            ':' => {
+                closed = true;
+                break :loop;
+            },
+            else => {
+                continue;
+            },
+        }
+    }
+    if (!closed) {
+        return Error.InvalidJsonError;
+    }
+    tree.lazyAddNode(parent, Syntaxtree.Token.Colon) catch return Error.TreeAllocError;
+}
+
+fn process_key(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
     //consume value
     var closed = false;
     const ally = std.heap.page_allocator;
     var cc = char_collector.new(ally);
     cc.deinit();
-    while (idx.* < str.len) {
+    loop: while (idx.* < str.len) {
         const ch = str[idx.*];
         idx.* += 1;
         switch (ch) {
             '"' => {
                 closed = true;
-                break;
+                break :loop;
             },
             else => {
                 cc.concat(ch) catch return Error.ConcatError;
             },
         }
     }
+    print("Closed status before check: {}\n", .{closed});
     if (!closed) {
         return Error.InvalidJsonError;
     }
@@ -36,21 +72,23 @@ fn process_value(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Synta
     defer ally.free(owned_str);
     print("printing collected value: {s}\n", .{owned_str});
     tree.lazyAddNode(parent, Syntaxtree.Token.KeyField) catch return Error.TreeAllocError;
+    //must find :
+    try find_colon(str, idx, tree, parent);
 }
 
 fn process_object(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
     //consume "closing bracket"
     var closed = false;
-    while (idx.* < str.len) {
+    loop: while (idx.* < str.len) {
         const ch = str[idx.*];
         idx.* += 1;
         switch (ch) {
             '}' => {
                 closed = true;
-                break;
+                break :loop;
             },
             '"' => {
-                try process_value(str, idx, tree, parent);
+                try process_key(str, idx, tree, parent);
             },
             else => {},
         }
@@ -186,4 +224,8 @@ test "step3/invalid.json" {
         else => return err,
     };
     try std.testing.expect(err_returned);
+}
+
+test "sanity_check" {
+    sanity_check();
 }

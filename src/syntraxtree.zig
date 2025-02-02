@@ -8,6 +8,7 @@ pub const Token = union(enum) {
     KeyField,
     ValueField,
     Array,
+    Colon,
 };
 
 pub const Node = struct {
@@ -51,6 +52,7 @@ fn print_node(node: *Node, level: i32) void {
         Token.KeyField => print("Level: {d}, KeyField\n", .{level}),
         Token.ValueField => print("Level: {d}, ValueField\n", .{level}),
         Token.Array => print("Level: {d}, Array\n", .{level}),
+        Token.Colon => print("Level: {d}, Colon\n", .{level}),
     }
     if (node.children) |children| {
         for (children.items) |child| {
