@@ -10,28 +10,16 @@ const Error = error{
     ConcatError,
 };
 
-fn sanity_check() void {
-    var closed = false;
-    const str: []const u8 = "hello";
-    for (str) |ch| {
-        switch (ch) {
-            'e' => closed = true,
-            else => print("nothing\n", .{}),
-        }
-    }
-    if (!closed) {
-        print("not closed!\n", .{});
-    }
-}
 fn find_colon(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
+    print("in find_colon, idx: {}\n", .{idx.*});
     //consume : or exit with invalidjson error
-    var closed = false;
+    var found = false;
     loop: while (idx.* < str.len) {
         const ch = str[idx.*];
         idx.* += 1;
         switch (ch) {
             ':' => {
-                closed = true;
+                found = true;
                 break :loop;
             },
             else => {
@@ -39,13 +27,14 @@ fn find_colon(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtr
             },
         }
     }
-    if (!closed) {
+    if (!found) {
         return Error.InvalidJsonError;
     }
     tree.lazyAddNode(parent, Syntaxtree.Token.Colon) catch return Error.TreeAllocError;
 }
 
 fn process_key(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
+    print("in process key, idx: {}\n", .{idx.*});
     //consume value
     var closed = false;
     const ally = std.heap.page_allocator;
@@ -70,13 +59,13 @@ fn process_key(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxt
     }
     const owned_str = cc.get() catch return Error.ConcatError;
     defer ally.free(owned_str);
-    print("printing collected value: {s}\n", .{owned_str});
     tree.lazyAddNode(parent, Syntaxtree.Token.KeyField) catch return Error.TreeAllocError;
     //must find :
     try find_colon(str, idx, tree, parent);
 }
 
 fn process_object(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
+    print("in process object, idx: {}\n", .{idx.*});
     //consume "closing bracket"
     var closed = false;
     loop: while (idx.* < str.len) {
@@ -224,8 +213,4 @@ test "step3/invalid.json" {
         else => return err,
     };
     try std.testing.expect(err_returned);
-}
-
-test "sanity_check" {
-    sanity_check();
 }
