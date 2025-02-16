@@ -90,15 +90,35 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     }
 
     printList(tokenList);
-    //checks
+    // checks
     // try paranthesis_check(allocator, tokenList);
 }
-// fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Token)) !bool {
-//     const st = Stack(T.new(allocator);
-//     try tokenList.append(Token.ObjectOpen);
-//     printList(tokenList);
-//     defer st.list.deinit();
-// }
+
+fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Token)) !bool {
+    printList(tokenList);
+    const st = try Stack(Token).new(allocator);
+    defer st.list.deinit();
+    for (tokenList.items) |token| switch (token) {
+        Token.ObjectOpen => st.push(token),
+        Token.ObjectClose => {
+            const popped = try st.pop();
+            if (popped != Token.ObjectOpen) {
+                //TODO continue implementing paranthesis_check
+            }
+        },
+    };
+    return true;
+}
+
+test "paranthesis_checktest" {
+    const ally = std.testing.allocator;
+    var tokenList = std.ArrayList(Token).init(ally);
+    defer tokenList.deinit();
+    try tokenList.append(Token.ObjectOpen);
+    try tokenList.append(Token.ObjectClose);
+    const got = try paranthesis_check(ally, tokenList);
+    try std.testing.expect(got);
+}
 
 test "step2/invalid.json" {
     print("------------\n", .{});
