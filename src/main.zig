@@ -2,6 +2,7 @@ const std = @import("std");
 const fs = std.fs;
 const char_collector = @import("char_collector.zig");
 const print = std.debug.print;
+const Stack = @import("stack.zig").Stack;
 
 const Error = error{
     InvalidJsonError,
@@ -87,7 +88,15 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     }
 
     printList(tokenList);
+    //checks
+    // try paranthesis_check(allocator, tokenList);
 }
+// fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Token)) !bool {
+//     const st = Stack(T.new(allocator);
+//     try tokenList.append(Token.ObjectOpen);
+//     printList(tokenList);
+//     defer st.list.deinit();
+// }
 
 test "step2/invalid.json" {
     print("------------\n", .{});
@@ -152,6 +161,18 @@ test "step2/invalid2.json" {
         else => return err,
     };
     try std.testing.expect(err_returned);
+}
+
+test "stacktest" {
+    const allocator = std.testing.allocator;
+    var st = try Stack(i32).new(allocator);
+    defer st.deinit();
+    try st.push(1);
+    try st.push(2);
+    try st.push(3);
+    const three = try st.peek();
+    try std.testing.expectEqual(3, three);
+    print("{d}\n", .{st.list.items.len});
 }
 
 //TODO: this test fails because we only check parse key, there should be a parse_value after that
