@@ -8,7 +8,6 @@ const Error = error{
     InvalidJsonError,
 };
 
-
 pub const Token = union(enum) {
     ObjectOpen,
     ObjectClose,
@@ -58,7 +57,6 @@ fn printList(list: std.ArrayList(Token)) void {
             Token.Field => print("\"field\"\n", .{}),
             Token.Colon => print(":\n", .{}),
             Token.Comma => print(",\n", .{}),
-
         }
     }
 }
@@ -167,6 +165,8 @@ test "step2/invalid2.json" {
     try std.testing.expect(err_returned);
 }
 
+//removing this test breaks the testing plugin lol
+//probably because it includes Stack that way
 test "stacktest" {
     const allocator = std.testing.allocator;
     var st = try Stack(i32).new(allocator);
@@ -176,11 +176,9 @@ test "stacktest" {
     try st.push(3);
     const three = try st.peek();
     try std.testing.expectEqual(3, three);
-    print("{d}\n", .{st.list.items.len});
+    print("itemslength: {d}\n", .{st.list.items.len});
 }
 
-//TODO: this test fails because we only check parse key, there should be a parse_value after that
-//but: the value could itself be a json object. so call parse_json? but that's not ready to be called recursively
 test "step2/valid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
