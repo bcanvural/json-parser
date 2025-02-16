@@ -8,6 +8,7 @@ const Error = error{
     InvalidJsonError,
 };
 
+
 pub const Token = union(enum) {
     ObjectOpen,
     ObjectClose,
@@ -19,6 +20,7 @@ pub const Token = union(enum) {
 };
 
 fn process_field(str: []const u8, idx: *usize) !void {
+
     //consume value
     var closed = false;
     const ally = std.heap.page_allocator;
@@ -42,6 +44,7 @@ fn process_field(str: []const u8, idx: *usize) !void {
     }
     const owned_str = try cc.get();
     defer ally.free(owned_str);
+
     print("printing collected value: {s}\n", .{owned_str});
 }
 
@@ -55,6 +58,7 @@ fn printList(list: std.ArrayList(Token)) void {
             Token.Field => print("\"field\"\n", .{}),
             Token.Colon => print(":\n", .{}),
             Token.Comma => print(",\n", .{}),
+
         }
     }
 }
