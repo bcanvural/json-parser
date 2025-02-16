@@ -1,45 +1,31 @@
 const std = @import("std");
 const fs = std.fs;
-const Syntaxtree = @import("syntraxtree.zig");
 const char_collector = @import("char_collector.zig");
 const print = std.debug.print;
+const Stack = @import("stack.zig").Stack;
 
 const Error = error{
     InvalidJsonError,
-    TreeAllocError,
-    ConcatError,
 };
 
-fn find_colon(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
-    print("in find_colon, idx: {}\n", .{idx.*});
-    //consume : or exit with invalidjson error
-    var found = false;
-    loop: while (idx.* < str.len) {
-        const ch = str[idx.*];
-        idx.* += 1;
-        switch (ch) {
-            ':' => {
-                found = true;
-                break :loop;
-            },
-            else => {
-                continue;
-            },
-        }
-    }
-    if (!found) {
-        return Error.InvalidJsonError;
-    }
-    tree.lazyAddNode(parent, Syntaxtree.Token.Colon) catch return Error.TreeAllocError;
-}
 
-fn process_key(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
-    print("in process key, idx: {}\n", .{idx.*});
+pub const Token = union(enum) {
+    ObjectOpen,
+    ObjectClose,
+    Field,
+    Colon,
+    ArrayOpen,
+    ArrayClose,
+    Comma,
+};
+
+fn process_field(str: []const u8, idx: *usize) !void {
+
     //consume value
     var closed = false;
     const ally = std.heap.page_allocator;
     var cc = char_collector.new(ally);
-    cc.deinit();
+    defer cc.deinit();
     loop: while (idx.* < str.len) {
         const ch = str[idx.*];
         idx.* += 1;
@@ -49,87 +35,99 @@ fn process_key(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxt
                 break :loop;
             },
             else => {
-                cc.concat(ch) catch return Error.ConcatError;
+                try cc.concat(ch);
             },
         }
     }
-    print("Closed status before check: {}\n", .{closed});
     if (!closed) {
         return Error.InvalidJsonError;
     }
-    const owned_str = cc.get() catch return Error.ConcatError;
+    const owned_str = try cc.get();
     defer ally.free(owned_str);
-    tree.lazyAddNode(parent, Syntaxtree.Token.KeyField) catch return Error.TreeAllocError;
-    //must find :
-    try find_colon(str, idx, tree, parent);
+
+    print("printing collected value: {s}\n", .{owned_str});
 }
 
-fn process_object(str: []const u8, idx: *usize, tree: *Syntaxtree, parent: *Syntaxtree.Node) Error!void {
-    print("in process object, idx: {}\n", .{idx.*});
-    //consume "closing bracket"
-    var closed = false;
-    loop: while (idx.* < str.len) {
-        const ch = str[idx.*];
-        idx.* += 1;
-        switch (ch) {
-            '}' => {
-                closed = true;
-                break :loop;
-            },
-            '"' => {
-                try process_key(str, idx, tree, parent);
-            },
-            else => {},
+fn printList(list: std.ArrayList(Token)) void {
+    for (list.items) |value| {
+        switch (value) {
+            Token.ObjectOpen => print("{{\n", .{}),
+            Token.ObjectClose => print("}}\n", .{}),
+            Token.ArrayOpen => print("[\n", .{}),
+            Token.ArrayClose => print("]\n", .{}),
+            Token.Field => print("\"field\"\n", .{}),
+            Token.Colon => print(":\n", .{}),
+            Token.Comma => print(",\n", .{}),
+
         }
     }
-    if (!closed) {
-        return Error.InvalidJsonError;
-    }
-    return;
 }
-
-pub fn parse_json(str: []u8) Error!void {
+pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     if (str.len == 0) {
         return Error.InvalidJsonError;
     }
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const ally = arena.allocator();
-    var tree = Syntaxtree.new(ally, Syntaxtree.Token.Object) catch return Error.TreeAllocError;
-    tree.print_tr();
+    var tokenList = std.ArrayList(Token).init(allocator);
+    defer tokenList.deinit();
 
     var idx: usize = 0;
     while (idx < str.len) {
         const ch = str[idx];
         idx += 1;
         switch (ch) {
-            '{' => {
-                try process_object(
-                    str,
-                    &idx,
-                    &tree,
-                    tree.root.?,
-                );
-                continue;
+            '{' => try tokenList.append(Token.ObjectOpen),
+            '"' => {
+                try process_field(str, &idx);
+                try tokenList.append(Token.Field);
             },
-            else => print("else\n", .{}),
+            ':' => {
+                try tokenList.append(Token.Colon);
+            },
+            '}' => try tokenList.append(Token.ObjectClose),
+            '[' => try tokenList.append(Token.ArrayOpen),
+            ']' => try tokenList.append(Token.ArrayClose),
+            ',' => try tokenList.append(Token.Comma),
+            else => continue,
         }
     }
-    tree.print_tr();
+
+    printList(tokenList);
+    //checks
+    // try paranthesis_check(allocator, tokenList);
 }
+// fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Token)) !bool {
+//     const st = Stack(T.new(allocator);
+//     try tokenList.append(Token.ObjectOpen);
+//     printList(tokenList);
+//     defer st.list.deinit();
+// }
+
+test "step2/invalid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const ally = arena.allocator();
+    const allocator = arena.allocator();
 
-    const cwd_path = try std.fs.cwd().realpathAlloc(ally, ".");
+    const cwd_path = try std.fs.cwd().realpathAlloc(allocator, ".");
     std.log.info("cwd: {s}", .{cwd_path});
 
     const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
-    const valid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(valid_json);
-    try parse_json(valid_json);
+    const valid_json = try file.reader().readAllAlloc(allocator, 1024);
+    defer allocator.free(valid_json);
+    try parse_json(allocator, valid_json);
 }
 
 test "step1/invalid.json" {
@@ -139,7 +137,7 @@ test "step1/invalid.json" {
     const invalid_json = try file.reader().readAllAlloc(std.testing.allocator, 1024);
     defer ally.free(invalid_json);
     var err_returned = false;
-    parse_json(invalid_json) catch |err| switch (err) {
+    parse_json(ally, invalid_json) catch |err| switch (err) {
         Error.InvalidJsonError => err_returned = true,
         else => return err,
     };
@@ -152,21 +150,7 @@ test "step1/valid.json" {
     const ally = std.testing.allocator;
     const valid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(valid_json);
-    try parse_json(valid_json);
-}
-
-test "step2/invalid.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
-    const ally = std.testing.allocator;
-    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(invalid_json);
-    var err_returned = false;
-    parse_json(invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
-        else => return err,
-    };
-    try std.testing.expect(err_returned);
+    try parse_json(ally, valid_json);
 }
 
 test "step2/invalid2.json" {
@@ -176,20 +160,34 @@ test "step2/invalid2.json" {
     const invalid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(invalid_json);
     var err_returned = false;
-    parse_json(invalid_json) catch |err| switch (err) {
+    parse_json(ally, invalid_json) catch |err| switch (err) {
         Error.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
 }
 
+test "stacktest" {
+    const allocator = std.testing.allocator;
+    var st = try Stack(i32).new(allocator);
+    defer st.deinit();
+    try st.push(1);
+    try st.push(2);
+    try st.push(3);
+    const three = try st.peek();
+    try std.testing.expectEqual(3, three);
+    print("{d}\n", .{st.list.items.len});
+}
+
+//TODO: this test fails because we only check parse key, there should be a parse_value after that
+//but: the value could itself be a json object. so call parse_json? but that's not ready to be called recursively
 test "step2/valid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
     const ally = std.testing.allocator;
     const valid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(valid_json);
-    try parse_json(valid_json);
+    try parse_json(ally, valid_json);
 }
 
 test "step2/valid2.json" {
@@ -198,7 +196,7 @@ test "step2/valid2.json" {
     const ally = std.testing.allocator;
     const valid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(valid_json);
-    try parse_json(valid_json);
+    try parse_json(ally, valid_json);
 }
 
 test "step3/invalid.json" {
@@ -208,7 +206,7 @@ test "step3/invalid.json" {
     const invalid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(invalid_json);
     var err_returned = false;
-    parse_json(invalid_json) catch |err| switch (err) {
+    parse_json(ally, invalid_json) catch |err| switch (err) {
         Error.InvalidJsonError => err_returned = true,
         else => return err,
     };
