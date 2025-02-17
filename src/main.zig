@@ -94,20 +94,33 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     // try paranthesis_check(allocator, tokenList);
 }
 
-fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Token)) !bool {
+fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Token)) !void {
     printList(tokenList);
-    const st = try Stack(Token).new(allocator);
+    var st = try Stack(Token).new(allocator);
     defer st.list.deinit();
-    for (tokenList.items) |token| switch (token) {
+    for (tokenList.items) |token| try switch (token) {
         Token.ObjectOpen => st.push(token),
         Token.ObjectClose => {
             const popped = try st.pop();
             if (popped != Token.ObjectOpen) {
-                //TODO continue implementing paranthesis_check
+                print("Unclosed object paranthesis\n", .{});
+                return Error.InvalidJsonError;
             }
         },
+        Token.ArrayOpen => st.push(token),
+        Token.ArrayClose => {
+            const popped = try st.pop();
+            if (popped != Token.ArrayOpen) {
+                print("Unclosed array paranthesis\n", .{});
+                return Error.InvalidJsonError;
+            }
+        },
+        else => continue,
     };
-    return true;
+    //stack can only have elements if the parantheses were unbalanced!
+    if (!st.empty()) {
+        return Error.InvalidJsonError;
+    }
 }
 
 test "paranthesis_checktest" {
@@ -116,8 +129,16 @@ test "paranthesis_checktest" {
     defer tokenList.deinit();
     try tokenList.append(Token.ObjectOpen);
     try tokenList.append(Token.ObjectClose);
-    const got = try paranthesis_check(ally, tokenList);
-    try std.testing.expect(got);
+    try paranthesis_check(ally, tokenList);
+
+    try tokenList.append(Token.ArrayOpen);
+    var foundInvalidError = false;
+    _ = paranthesis_check(ally, tokenList) catch |err| switch (err) {
+        Error.InvalidJsonError => foundInvalidError = true,
+        else => {},
+    };
+
+    try std.testing.expect(foundInvalidError);
 }
 
 test "step2/invalid.json" {
@@ -183,20 +204,6 @@ test "step2/invalid2.json" {
         else => return err,
     };
     try std.testing.expect(err_returned);
-}
-
-//removing this test breaks the testing plugin lol
-//probably because it includes Stack that way
-test "stacktest" {
-    const allocator = std.testing.allocator;
-    var st = try Stack(i32).new(allocator);
-    defer st.deinit();
-    try st.push(1);
-    try st.push(2);
-    try st.push(3);
-    const three = try st.peek();
-    try std.testing.expectEqual(3, three);
-    print("itemslength: {d}\n", .{st.list.items.len});
 }
 
 test "step2/valid.json" {

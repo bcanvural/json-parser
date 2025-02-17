@@ -44,6 +44,9 @@ pub fn Stack(comptime T: type) type {
             self.list.items.len -= 1;
             return popped;
         }
+        pub fn empty(self: *Stack(T)) bool {
+            return self.list.items.len == 0;
+        }
     };
 }
 
