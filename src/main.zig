@@ -40,6 +40,7 @@ fn process_string(str: []const u8, idx: *usize) !void {
         }
     }
     if (!closed) {
+        print("String was not closed\n", .{});
         return Error.InvalidJsonError;
     }
     const owned_str = try cc.get();
@@ -61,7 +62,7 @@ fn process_number(str: []const u8, idx: *usize) !void {
         const ch = str[idx.*];
         idx.* += 1;
         switch (ch) {
-            ':', ' ', ',' => {
+            ':', ' ', ',', '}' => {
                 closed = true;
                 idx.* -= 1; //let these tokens be processed outside
                 break :loop;
@@ -72,6 +73,7 @@ fn process_number(str: []const u8, idx: *usize) !void {
         }
     }
     if (!closed) {
+        print("Number was not closed\n", .{});
         return Error.InvalidJsonError;
     }
 
@@ -103,7 +105,7 @@ fn printList(list: std.ArrayList(Token)) void {
             Token.ArrayOpen => print("[\n", .{}),
             Token.ArrayClose => print("]\n", .{}),
             Token.NumField => print("\"NUM\"\n", .{}),
-            Token.StringField => print("\"STR\"", .{}),
+            Token.StringField => print("\"STR\"\n", .{}),
             Token.Colon => print(":\n", .{}),
             Token.Comma => print(",\n", .{}),
         }
@@ -145,14 +147,64 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     printList(tokenList);
     // checks
     try paranthesis_check(allocator, tokenList);
-    try colon_check(allocator, tokenList);
-    //TODO comma chec
+    try colon_check(tokenList);
+    //TODO comma check
 }
 
+//a colon can start earliest 3rd token
+//a colon can only have a string field left of it.
+//a colon can have {, [, stringfield, numfield to the right of it
 fn colon_check(tokenList: std.ArrayList(Token)) !void {
-    //a colon can only have a string field left of it.
-    //a colon can have {, [, stringfield, numfield to the right of it
-    //TODO continue
+    const len = tokenList.items.len;
+    var colonFound = false;
+    var fieldFound = false;
+    for (tokenList.items, 0..) |token, i| {
+        switch (token) {
+            Token.StringField, Token.NumField => {
+                fieldFound = true;
+            },
+            Token.Colon => {
+                if (i < 2 or i == len - 1) {
+                    return Error.InvalidJsonError;
+                }
+                colonFound = true;
+                const left = tokenList.items[i - 1];
+                const right = tokenList.items[i + 1];
+                switch (left) {
+                    Token.NumField => return Error.InvalidJsonError,
+                    else => {},
+                }
+                switch (right) {
+                    Token.ObjectOpen, Token.ArrayOpen, Token.StringField, Token.NumField => {},
+                    else => return Error.InvalidJsonError,
+                }
+            },
+            else => continue,
+        }
+    }
+    //having one field means you gotta have colon too
+    if (fieldFound and !colonFound) {
+        print("Field was found but there was no colon!\n", .{});
+        return Error.InvalidJsonError;
+    }
+}
+
+test "custom colons tests" {
+    for (1..5) |idx| {
+        print("---Running Colon test {d}\n", .{idx});
+        const ally = std.testing.allocator;
+        const file_name = try std.fmt.allocPrint(ally, "tests/custom/colon{d}.json", .{idx});
+        defer ally.free(file_name);
+        const file = try std.fs.cwd().openFile(file_name, .{});
+        const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+        defer ally.free(invalid_json);
+        var err_returned = false;
+        parse_json(ally, invalid_json) catch |err| switch (err) {
+            Error.InvalidJsonError => err_returned = true,
+            else => return err,
+        };
+        try std.testing.expect(err_returned);
+    }
 }
 
 //below checks if open and close parantheses are balanced
@@ -202,20 +254,6 @@ test "paranthesis_checktest" {
     try std.testing.expect(foundInvalidError);
 }
 
-test "step2/invalid.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
-    const ally = std.testing.allocator;
-    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(invalid_json);
-    var err_returned = false;
-    parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
-        else => return err,
-    };
-    try std.testing.expect(err_returned);
-}
-
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -253,6 +291,20 @@ test "step1/valid.json" {
     try parse_json(ally, valid_json);
 }
 
+//TODO next one to tackle
+test "step2/invalid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
+}
 test "step2/invalid2.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/invalid2.json", .{});
@@ -275,7 +327,6 @@ test "step2/valid.json" {
     defer ally.free(valid_json);
     try parse_json(ally, valid_json);
 }
-
 test "step2/valid2.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/valid2.json", .{});
