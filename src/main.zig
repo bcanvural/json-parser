@@ -11,14 +11,15 @@ const Error = error{
 pub const Token = union(enum) {
     ObjectOpen,
     ObjectClose,
-    Field,
+    StringField,
+    NumField,
     Colon,
     ArrayOpen,
     ArrayClose,
     Comma,
 };
 
-fn process_field(str: []const u8, idx: *usize) !void {
+fn process_string(str: []const u8, idx: *usize) !void {
 
     //consume value
     var closed = false;
@@ -46,6 +47,53 @@ fn process_field(str: []const u8, idx: *usize) !void {
 
     print("printing collected value: {s}\n", .{owned_str});
 }
+fn process_number(str: []const u8, idx: *usize) !void {
+    //we are here because we detected a digit
+    //walk through until whitespace or :
+
+    var closed = false;
+    const ally = std.heap.page_allocator;
+    var cc = char_collector.new(ally);
+    defer cc.deinit();
+    try cc.concat(str[idx.* - 1]); //starting by concatting detected digit
+
+    loop: while (idx.* < str.len) {
+        const ch = str[idx.*];
+        idx.* += 1;
+        switch (ch) {
+            ':', ' ', ',' => {
+                closed = true;
+                idx.* -= 1; //let these tokens be processed outside
+                break :loop;
+            },
+            else => {
+                try cc.concat(ch);
+            },
+        }
+    }
+    if (!closed) {
+        return Error.InvalidJsonError;
+    }
+
+    const owned_str = try cc.get();
+    defer ally.free(owned_str);
+
+    print("printing collected value: {s}\n", .{owned_str});
+}
+
+test "custom/num.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/num.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
+}
 
 fn printList(list: std.ArrayList(Token)) void {
     for (list.items) |value| {
@@ -54,7 +102,8 @@ fn printList(list: std.ArrayList(Token)) void {
             Token.ObjectClose => print("}}\n", .{}),
             Token.ArrayOpen => print("[\n", .{}),
             Token.ArrayClose => print("]\n", .{}),
-            Token.Field => print("\"field\"\n", .{}),
+            Token.NumField => print("\"NUM\"\n", .{}),
+            Token.StringField => print("\"STR\"", .{}),
             Token.Colon => print(":\n", .{}),
             Token.Comma => print(",\n", .{}),
         }
@@ -75,8 +124,8 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
         switch (ch) {
             '{' => try tokenList.append(Token.ObjectOpen),
             '"' => {
-                try process_field(str, &idx);
-                try tokenList.append(Token.Field);
+                try process_string(str, &idx);
+                try tokenList.append(Token.StringField);
             },
             ':' => {
                 try tokenList.append(Token.Colon);
@@ -85,17 +134,29 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
             '[' => try tokenList.append(Token.ArrayOpen),
             ']' => try tokenList.append(Token.ArrayClose),
             ',' => try tokenList.append(Token.Comma),
+            '0'...'9' => {
+                try process_number(str, &idx);
+                try tokenList.append(Token.NumField);
+            },
             else => continue,
         }
     }
 
     printList(tokenList);
     // checks
-    // try paranthesis_check(allocator, tokenList);
+    try paranthesis_check(allocator, tokenList);
+    try colon_check(allocator, tokenList);
+    //TODO comma chec
 }
 
+fn colon_check(tokenList: std.ArrayList(Token)) !void {
+    //a colon can only have a string field left of it.
+    //a colon can have {, [, stringfield, numfield to the right of it
+    //TODO continue
+}
+
+//below checks if open and close parantheses are balanced
 fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Token)) !void {
-    printList(tokenList);
     var st = try Stack(Token).new(allocator);
     defer st.list.deinit();
     for (tokenList.items) |token| try switch (token) {
