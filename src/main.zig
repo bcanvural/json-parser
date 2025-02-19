@@ -75,7 +75,7 @@ fn process_value(str: []const u8, idx: *usize) !Token {
         const ch = str[idx.*];
         idx.* += 1;
         switch (ch) {
-            ':', ' ', ',', '}' => {
+            ':', ' ', ',', '}', '\n', '\r' => {
                 closed = true;
                 idx.* -= 1; //let these tokens be processed outside
                 break :loop;
@@ -201,11 +201,11 @@ fn colon_check(tokenList: std.ArrayList(Token)) !void {
                 const left = tokenList.items[i - 1];
                 const right = tokenList.items[i + 1];
                 switch (left) {
-                    Token.NumField => return Error.InvalidJsonError,
-                    else => {},
+                    Token.StringField => {},
+                    else => return Error.InvalidJsonError,
                 }
                 switch (right) {
-                    Token.ObjectOpen, Token.ArrayOpen, Token.StringField, Token.NumField => {},
+                    Token.ObjectOpen, Token.ArrayOpen, Token.StringField, Token.NumField, Token.NullField, Token.TrueField, Token.FalseField => {},
                     else => return Error.InvalidJsonError,
                 }
             },
@@ -320,7 +320,7 @@ test "step1/valid.json" {
     defer ally.free(valid_json);
     try parse_json(ally, valid_json);
 }
-
+//TODO next one to tackle
 test "step2/invalid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
@@ -378,7 +378,6 @@ test "step3/invalid.json" {
     };
     try std.testing.expect(err_returned);
 }
-//TODO next one to tackle
 test "step3/valid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step3/valid.json", .{});
