@@ -13,6 +13,9 @@ pub const Token = union(enum) {
     ObjectClose,
     StringField,
     NumField,
+    TrueField,
+    FalseField,
+    NullField,
     Colon,
     ArrayOpen,
     ArrayClose,
@@ -48,10 +51,20 @@ fn process_string(str: []const u8, idx: *usize) !void {
 
     print("printing collected value: {s}\n", .{owned_str});
 }
-fn process_number(str: []const u8, idx: *usize) !void {
-    //we are here because we detected a digit
-    //walk through until whitespace or :
+fn isNumber(str: []const u8) bool {
+    var foundNumber = true;
+    _ = std.fmt.parseInt(i64, str, 10) catch {
+        _ = std.fmt.parseFloat(f64, str) catch {
+            foundNumber = false;
+        };
+    };
 
+    return foundNumber;
+}
+//From RFC: A json value must be an object, array, number, or string, or one of the following three literal names:
+//false, null, true
+//below we only check for number, false, null, true
+fn process_value(str: []const u8, idx: *usize) !Token {
     var closed = false;
     const ally = std.heap.page_allocator;
     var cc = char_collector.new(ally);
@@ -72,15 +85,29 @@ fn process_number(str: []const u8, idx: *usize) !void {
             },
         }
     }
+
     if (!closed) {
-        print("Number was not closed\n", .{});
+        print("Value was not closed\n", .{});
         return Error.InvalidJsonError;
     }
 
     const owned_str = try cc.get();
+    print("printing collected value: {s}\n", .{owned_str});
     defer ally.free(owned_str);
 
-    print("printing collected value: {s}\n", .{owned_str});
+    if (isNumber(owned_str)) {
+        return Token.NumField;
+    }
+
+    if (std.mem.eql(u8, owned_str, "true")) {
+        return Token.TrueField;
+    } else if (std.mem.eql(u8, owned_str, "false")) {
+        return Token.FalseField;
+    } else if (std.mem.eql(u8, owned_str, "null")) {
+        return Token.NullField;
+    } else {
+        return Error.InvalidJsonError;
+    }
 }
 
 test "custom/num.json" {
@@ -106,6 +133,9 @@ fn printList(list: std.ArrayList(Token)) void {
             Token.ArrayClose => print("]\n", .{}),
             Token.NumField => print("\"NUM\"\n", .{}),
             Token.StringField => print("\"STR\"\n", .{}),
+            Token.TrueField => print("\"TRUE\"\n", .{}),
+            Token.FalseField => print("\"FALSE\"\n", .{}),
+            Token.NullField => print("\"NULL\"\n", .{}),
             Token.Colon => print(":\n", .{}),
             Token.Comma => print(",\n", .{}),
         }
@@ -136,9 +166,9 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
             '[' => try tokenList.append(Token.ArrayOpen),
             ']' => try tokenList.append(Token.ArrayClose),
             ',' => try tokenList.append(Token.Comma),
-            '0'...'9' => {
-                try process_number(str, &idx);
-                try tokenList.append(Token.NumField);
+            '0'...'9', 'a'...'z', 'A'...'Z' => {
+                const value = try process_value(str, &idx);
+                try tokenList.append(value);
             },
             else => continue,
         }
@@ -291,7 +321,6 @@ test "step1/valid.json" {
     try parse_json(ally, valid_json);
 }
 
-//TODO next one to tackle
 test "step2/invalid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
@@ -348,4 +377,42 @@ test "step3/invalid.json" {
         else => return err,
     };
     try std.testing.expect(err_returned);
+}
+//TODO next one to tackle
+test "step3/valid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step3/valid.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
+test "step4/invalid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step4/invalid.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
+}
+test "step4/valid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step4/valid.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
+test "step4/valid2.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step4/valid2.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
 }
