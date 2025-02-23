@@ -22,6 +22,18 @@ pub const Token = union(enum) {
     Comma,
 };
 
+pub const ObjectParseToken = union(enum) {
+    KeyField,
+    ValueField,
+    Colon,
+    Comma,
+};
+
+pub const ArrayParseToken = union(enum) {
+    ObjectField,
+    Comma,
+};
+
 fn process_string(str: []const u8, idx: *usize) !void {
 
     //consume value
@@ -177,8 +189,113 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     printList(tokenList);
     // checks
     try paranthesis_check(allocator, tokenList);
-    try colon_check(tokenList);
-    //TODO comma check
+    // try colon_check(tokenList);
+    // try comma_check(tokenList);
+    try parseTokenList(allocator, &tokenList);
+}
+
+fn parseArray(tokenList: *std.ArrayList(Token), idx: *usize) !void {
+    // const len = tokenList.items.len;
+    _ = tokenList;
+    _ = idx;
+
+    return;
+}
+fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) !void {
+    const len = tokenList.items.len;
+    var firstPassList = std.ArrayList(ObjectParseToken).init(allocator);
+    defer firstPassList.deinit();
+    //first pass: we make a pass and recursively resolve all tokens into key, value, comma or colon fields.
+    while (idx.* < len) {
+        const token = tokenList.items[idx.*];
+        idx.* += 1; // we increment by default, handle unique cases separately
+        switch (token) {
+            Token.StringField, Token.NumField, Token.TrueField, Token.FalseField, Token.NullField => {
+                //are we key or or we value?
+                //if we have a colon to our right we are key otherwise we are value
+                const r_index = idx.*;
+                if (r_index != len) {
+                    const right = tokenList.items[r_index];
+                    if (right == Token.Colon) {
+                        try firstPassList.append(ObjectParseToken.KeyField);
+                        break; //breaking the switch
+                    }
+                }
+                try firstPassList.append(ObjectParseToken.ValueField);
+            },
+            Token.Colon => try firstPassList.append(ObjectParseToken.Colon),
+            Token.Comma => try firstPassList.append(ObjectParseToken.Comma),
+            Token.ArrayOpen => {
+                try parseArray(tokenList, idx);
+                //if we survived above we can add this as a value field!
+                try firstPassList.append(ObjectParseToken.ValueField);
+            },
+            Token.ObjectOpen => {
+                try parseObject(allocator, tokenList, idx);
+                //if we survived above  we can add this as a value field!
+                try firstPassList.append(ObjectParseToken.ValueField);
+            },
+            Token.ObjectClose => {
+                print("In Object close", .{});
+                return;
+            },
+            Token.ArrayClose => {
+                print("in array close, this should never happen if parantheses are balanced", .{});
+                return Error.InvalidJsonError;
+            },
+        }
+    }
+
+    //second pass: we expect to see one of the following: {}, {key:value}, {key:value,key:value}, {key:value, key:value, key:value}... and so on
+    const firstPassListLen = firstPassList.items.len;
+    // var secondPassList = std.ArrayList(ObjectParseToken).init(allocator);
+    // defer secondPassList.deinit();
+
+    if (firstPassListLen == 0) {
+        return; //empty object is valid
+    }
+    if (firstPassListLen == 1 or firstPassListLen == 2) {
+        //we can never have only 1 or 2, something's fishy
+        return Error.InvalidJsonError;
+    }
+    var s_idx: usize = 1;
+    while (s_idx + 3 < firstPassListLen) : (s_idx += 4) {
+        const key = firstPassList.items[s_idx];
+        if (key != ObjectParseToken.KeyField) {
+            return Error.InvalidJsonError;
+        }
+        const colon = firstPassList.items[s_idx + 1];
+        if (colon != ObjectParseToken.Colon) {
+            return Error.InvalidJsonError;
+        }
+        const value = firstPassList.items[s_idx + 2];
+        if (value != ObjectParseToken.ValueField) {
+            return Error.InvalidJsonError;
+        }
+        //should we check for comma?
+        //"only if we are not the last key:value"
+        if (s_idx + 3 <= firstPassListLen - 4) {
+            const comma = firstPassList.items[s_idx + 3];
+            if (comma != ObjectParseToken.Comma) {
+                return Error.InvalidJsonError;
+            }
+        }
+    }
+}
+
+//todo debug new parsing method
+fn parseTokenList(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token)) !void {
+    if (tokenList.items.len == 0) {
+        return Error.InvalidJsonError;
+    }
+    var idx: usize = 1;
+    printList(tokenList);
+    const first = tokenList.items[idx];
+    switch (first) {
+        Token.ObjectOpen => try parseObject(allocator, tokenList, &idx),
+        // Token.ArrayOpen => try parseArray(tokenList, &idx),
+        else => return Error.InvalidJsonError,
+    }
 }
 
 //a colon can start earliest 3rd token
@@ -186,18 +303,32 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
 //a colon can have {, [, stringfield, numfield to the right of it
 fn colon_check(tokenList: std.ArrayList(Token)) !void {
     const len = tokenList.items.len;
-    var colonFound = false;
-    var fieldFound = false;
     for (tokenList.items, 0..) |token, i| {
         switch (token) {
             Token.StringField, Token.NumField => {
-                fieldFound = true;
+                if (i == 0 or i == len - 1) {
+                    return Error.InvalidJsonError;
+                }
+                //to the left or right, a token cannot exist it should've been a colon!
+                const left = tokenList.items[i - 1];
+                switch (left) {
+                    Token.StringField, Token.FalseField, Token.TrueField, Token.NullField => {
+                        return Error.InvalidJsonError;
+                    },
+                    else => {},
+                }
+                const right = tokenList.items[i + 1];
+                switch (right) {
+                    Token.StringField, Token.FalseField, Token.TrueField, Token.NullField, Token.ArrayOpen, Token.ObjectOpen => {
+                        return Error.InvalidJsonError;
+                    },
+                    else => {},
+                }
             },
             Token.Colon => {
                 if (i < 2 or i == len - 1) {
                     return Error.InvalidJsonError;
                 }
-                colonFound = true;
                 const left = tokenList.items[i - 1];
                 const right = tokenList.items[i + 1];
                 switch (left) {
@@ -212,15 +343,10 @@ fn colon_check(tokenList: std.ArrayList(Token)) !void {
             else => continue,
         }
     }
-    //having one field means you gotta have colon too
-    if (fieldFound and !colonFound) {
-        print("Field was found but there was no colon!\n", .{});
-        return Error.InvalidJsonError;
-    }
 }
 
 test "custom colons tests" {
-    for (1..5) |idx| {
+    for (1..7) |idx| {
         print("---Running Colon test {d}\n", .{idx});
         const ally = std.testing.allocator;
         const file_name = try std.fmt.allocPrint(ally, "tests/custom/colon{d}.json", .{idx});
@@ -296,6 +422,20 @@ pub fn main() !void {
     const valid_json = try file.reader().readAllAlloc(allocator, 1024);
     defer allocator.free(valid_json);
     try parse_json(allocator, valid_json);
+}
+
+test "custom/colon7.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/colon7.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
 }
 
 test "step1/invalid.json" {
