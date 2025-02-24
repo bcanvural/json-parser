@@ -136,21 +136,24 @@ test "custom/num.json" {
     try std.testing.expect(err_returned);
 }
 
-fn printList(list: std.ArrayList(Token)) void {
+fn printList(list: *std.ArrayList(Token)) void {
     for (list.items) |value| {
-        switch (value) {
-            Token.ObjectOpen => print("{{\n", .{}),
-            Token.ObjectClose => print("}}\n", .{}),
-            Token.ArrayOpen => print("[\n", .{}),
-            Token.ArrayClose => print("]\n", .{}),
-            Token.NumField => print("\"NUM\"\n", .{}),
-            Token.StringField => print("\"STR\"\n", .{}),
-            Token.TrueField => print("\"TRUE\"\n", .{}),
-            Token.FalseField => print("\"FALSE\"\n", .{}),
-            Token.NullField => print("\"NULL\"\n", .{}),
-            Token.Colon => print(":\n", .{}),
-            Token.Comma => print(",\n", .{}),
-        }
+        printToken(value);
+    }
+}
+fn printToken(token: Token) void {
+    switch (token) {
+        Token.ObjectOpen => print("{{\n", .{}),
+        Token.ObjectClose => print("}}\n", .{}),
+        Token.ArrayOpen => print("[\n", .{}),
+        Token.ArrayClose => print("]\n", .{}),
+        Token.NumField => print("\"NUM\"\n", .{}),
+        Token.StringField => print("\"STR\"\n", .{}),
+        Token.TrueField => print("\"TRUE\"\n", .{}),
+        Token.FalseField => print("\"FALSE\"\n", .{}),
+        Token.NullField => print("\"NULL\"\n", .{}),
+        Token.Colon => print(":\n", .{}),
+        Token.Comma => print(",\n", .{}),
     }
 }
 pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
@@ -166,7 +169,9 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
         const ch = str[idx];
         idx += 1;
         switch (ch) {
-            '{' => try tokenList.append(Token.ObjectOpen),
+            '{' => {
+                try tokenList.append(Token.ObjectOpen);
+            },
             '"' => {
                 try process_string(str, &idx);
                 try tokenList.append(Token.StringField);
@@ -186,7 +191,7 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
         }
     }
 
-    printList(tokenList);
+    printList(&tokenList);
     // checks
     try paranthesis_check(allocator, tokenList);
     // try colon_check(tokenList);
@@ -218,7 +223,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
                     const right = tokenList.items[r_index];
                     if (right == Token.Colon) {
                         try firstPassList.append(ObjectParseToken.KeyField);
-                        break; //breaking the switch
+                        continue;
                     }
                 }
                 try firstPassList.append(ObjectParseToken.ValueField);
@@ -236,8 +241,8 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
                 try firstPassList.append(ObjectParseToken.ValueField);
             },
             Token.ObjectClose => {
-                print("In Object close", .{});
-                return;
+                print("In Object close\n", .{});
+                continue;
             },
             Token.ArrayClose => {
                 print("in array close, this should never happen if parantheses are balanced", .{});
@@ -248,8 +253,6 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
 
     //second pass: we expect to see one of the following: {}, {key:value}, {key:value,key:value}, {key:value, key:value, key:value}... and so on
     const firstPassListLen = firstPassList.items.len;
-    // var secondPassList = std.ArrayList(ObjectParseToken).init(allocator);
-    // defer secondPassList.deinit();
 
     if (firstPassListLen == 0) {
         return; //empty object is valid
@@ -258,7 +261,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         //we can never have only 1 or 2, something's fishy
         return Error.InvalidJsonError;
     }
-    var s_idx: usize = 1;
+    var s_idx: usize = 0;
     while (s_idx + 3 < firstPassListLen) : (s_idx += 4) {
         const key = firstPassList.items[s_idx];
         if (key != ObjectParseToken.KeyField) {
@@ -279,18 +282,36 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
             if (comma != ObjectParseToken.Comma) {
                 return Error.InvalidJsonError;
             }
+        } else {
+            //there shouldn't be a trailing token
+            if (s_idx + 3 == firstPassListLen - 1) {
+                print("there's a dangling token\n", .{});
+                return Error.InvalidJsonError;
+            }
         }
     }
 }
 
+test "step2/invalid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
+}
 //todo debug new parsing method
 fn parseTokenList(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token)) !void {
     if (tokenList.items.len == 0) {
         return Error.InvalidJsonError;
     }
+    const first = tokenList.items[0];
     var idx: usize = 1;
-    printList(tokenList);
-    const first = tokenList.items[idx];
     switch (first) {
         Token.ObjectOpen => try parseObject(allocator, tokenList, &idx),
         // Token.ArrayOpen => try parseArray(tokenList, &idx),
@@ -460,19 +481,13 @@ test "step1/valid.json" {
     defer ally.free(valid_json);
     try parse_json(ally, valid_json);
 }
-//TODO next one to tackle
-test "step2/invalid.json" {
+test "step2/valid.json" {
     print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
+    const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
     const ally = std.testing.allocator;
-    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(invalid_json);
-    var err_returned = false;
-    parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
-        else => return err,
-    };
-    try std.testing.expect(err_returned);
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
 }
 test "step2/invalid2.json" {
     print("------------\n", .{});
@@ -488,14 +503,6 @@ test "step2/invalid2.json" {
     try std.testing.expect(err_returned);
 }
 
-test "step2/valid.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
-    const ally = std.testing.allocator;
-    const valid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(valid_json);
-    try parse_json(ally, valid_json);
-}
 test "step2/valid2.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/valid2.json", .{});
