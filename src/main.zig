@@ -122,20 +122,6 @@ fn process_value(str: []const u8, idx: *usize) !Token {
     }
 }
 
-test "custom/num.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/custom/num.json", .{});
-    const ally = std.testing.allocator;
-    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(invalid_json);
-    var err_returned = false;
-    parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
-        else => return err,
-    };
-    try std.testing.expect(err_returned);
-}
-
 fn printList(list: *std.ArrayList(Token)) void {
     for (list.items) |value| {
         printToken(value);
@@ -217,13 +203,15 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         switch (token) {
             Token.StringField, Token.NumField, Token.TrueField, Token.FalseField, Token.NullField => {
                 //are we key or or we value?
-                //if we have a colon to our right we are key otherwise we are value
-                const r_index = idx.*;
-                if (r_index != len) {
-                    const right = tokenList.items[r_index];
-                    if (right == Token.Colon) {
-                        try firstPassList.append(ObjectParseToken.KeyField);
-                        continue;
+                //if we are stringfield and if we have a colon to our right we are key otherwise we are value
+                if (token == Token.StringField) {
+                    const r_index = idx.*;
+                    if (r_index != len) {
+                        const right = tokenList.items[r_index];
+                        if (right == Token.Colon) {
+                            try firstPassList.append(ObjectParseToken.KeyField);
+                            continue;
+                        }
                     }
                 }
                 try firstPassList.append(ObjectParseToken.ValueField);
@@ -262,19 +250,32 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         return Error.InvalidJsonError;
     }
     var s_idx: usize = 0;
-    while (s_idx + 3 < firstPassListLen) : (s_idx += 4) {
-        const key = firstPassList.items[s_idx];
+
+    while (s_idx <= firstPassListLen - 1) {
+        const key_idx = s_idx;
+        const key = firstPassList.items[key_idx];
         if (key != ObjectParseToken.KeyField) {
             return Error.InvalidJsonError;
         }
-        const colon = firstPassList.items[s_idx + 1];
+        //
+        const colon_idx = key_idx + 1;
+        if (colon_idx == firstPassListLen) {
+            return Error.InvalidJsonError;
+        }
+        const colon = firstPassList.items[colon_idx];
         if (colon != ObjectParseToken.Colon) {
+            return Error.InvalidJsonError;
+        }
+        //
+        const value_idx = colon_idx + 1;
+        if (value_idx == firstPassListLen) {
             return Error.InvalidJsonError;
         }
         const value = firstPassList.items[s_idx + 2];
         if (value != ObjectParseToken.ValueField) {
             return Error.InvalidJsonError;
         }
+        //
         //should we check for comma?
         //"only if we are not the last key:value"
         if (s_idx + 3 <= firstPassListLen - 4) {
@@ -282,16 +283,60 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
             if (comma != ObjectParseToken.Comma) {
                 return Error.InvalidJsonError;
             }
+            s_idx += 4;
         } else {
-            //there shouldn't be a trailing token
-            if (s_idx + 3 == firstPassListLen - 1) {
-                print("there's a dangling token\n", .{});
-                return Error.InvalidJsonError;
-            }
+            s_idx += 3;
+        }
+    }
+    //third pass: make sure the commas are placed right.
+    //each comma must have a value on the left, and a key on the right. no exceptions
+    //problem: non-existence of commas can't be checked this way
+    for (firstPassList.items, 0..) |token, tp_idx| {
+        switch (token) {
+            ObjectParseToken.Comma => {
+                //bounds checks:
+                const l_idx = tp_idx - 1;
+                const r_idx = tp_idx + 1;
+                if (l_idx < 0 or r_idx > firstPassListLen - 1) {
+                    return Error.InvalidJsonError;
+                }
+                const left = firstPassList.items[l_idx];
+                const right = firstPassList.items[r_idx];
+                if (left != ObjectParseToken.ValueField and right != ObjectParseToken.KeyField) {
+                    return Error.InvalidJsonError;
+                }
+            },
+            else => {},
         }
     }
 }
-
+//TODO
+test "custom/colon5.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/colon5.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
+}
+test "custom/num.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/num.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
+}
 test "step2/invalid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step2/invalid.json", .{});
@@ -443,20 +488,6 @@ pub fn main() !void {
     const valid_json = try file.reader().readAllAlloc(allocator, 1024);
     defer allocator.free(valid_json);
     try parse_json(allocator, valid_json);
-}
-
-test "custom/colon7.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/custom/colon7.json", .{});
-    const ally = std.testing.allocator;
-    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(invalid_json);
-    var err_returned = false;
-    parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
-        else => return err,
-    };
-    try std.testing.expect(err_returned);
 }
 
 test "step1/invalid.json" {
