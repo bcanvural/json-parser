@@ -278,7 +278,8 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         //
         //should we check for comma?
         //"only if we are not the last key:value"
-        if (s_idx + 3 <= firstPassListLen - 4) {
+        //key:value are 3 tokens. 3 + 3 + 1comma = 7
+        if (s_idx + 7 <= firstPassListLen) {
             const comma = firstPassList.items[s_idx + 3];
             if (comma != ObjectParseToken.Comma) {
                 return Error.InvalidJsonError;
@@ -310,7 +311,14 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         }
     }
 }
-//TODO
+test "step2/valid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
 test "custom/colon5.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/custom/colon5.json", .{});
@@ -507,14 +515,6 @@ test "step1/invalid.json" {
 test "step1/valid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step1/valid.json", .{});
-    const ally = std.testing.allocator;
-    const valid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(valid_json);
-    try parse_json(ally, valid_json);
-}
-test "step2/valid.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
     const ally = std.testing.allocator;
     const valid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(valid_json);
