@@ -31,6 +31,7 @@ pub const ObjectParseToken = union(enum) {
 
 pub const ArrayParseToken = union(enum) {
     ObjectField,
+    ArrayField,
     Comma,
 };
 
@@ -185,13 +186,29 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     try parseTokenList(allocator, &tokenList);
 }
 
-fn parseArray(tokenList: *std.ArrayList(Token), idx: *usize) !void {
-    // const len = tokenList.items.len;
-    _ = tokenList;
-    _ = idx;
-
+fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) !void {
+    const len = tokenList.items.len;
+    var list = std.ArrayList(ArrayParseToken).init(allocator);
+    defer list.deinit();
+    while (idx.* < len) {
+        const token = tokenList.items[idx.*];
+        idx.* += 1;
+        switch (token) {
+            Token.ObjectOpen => {
+                try parseObject(allocator, tokenList, idx);
+                try list.append(ArrayParseToken.ObjectField);
+            },
+            Token.Comma => try list.append(ArrayParseToken.Comma),
+            Token.ArrayOpen => {
+                try parseArray(allocator, tokenList, idx);
+                try list.append(ArrayParseToken.ArrayField);
+            },
+            else => return Error.InvalidJsonError,
+        }
+    }
     return;
 }
+
 fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) !void {
     const len = tokenList.items.len;
     var firstPassList = std.ArrayList(ObjectParseToken).init(allocator);
@@ -219,7 +236,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
             Token.Colon => try firstPassList.append(ObjectParseToken.Colon),
             Token.Comma => try firstPassList.append(ObjectParseToken.Comma),
             Token.ArrayOpen => {
-                try parseArray(tokenList, idx);
+                try parseArray(allocator, tokenList, idx);
                 //if we survived above we can add this as a value field!
                 try firstPassList.append(ObjectParseToken.ValueField);
             },
@@ -292,6 +309,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
     //third pass: make sure the commas are placed right.
     //each comma must have a value on the left, and a key on the right. no exceptions
     //problem: non-existence of commas can't be checked this way
+    //but i believe we checked for commas in the previous pass
     for (firstPassList.items, 0..) |token, tp_idx| {
         switch (token) {
             ObjectParseToken.Comma => {
@@ -310,6 +328,19 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
             else => {},
         }
     }
+}
+test "custom/invalid.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/invalid.json", .{});
+    const ally = std.testing.allocator;
+    const invalid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(invalid_json);
+    var err_returned = false;
+    parse_json(ally, invalid_json) catch |err| switch (err) {
+        Error.InvalidJsonError => err_returned = true,
+        else => return err,
+    };
+    try std.testing.expect(err_returned);
 }
 test "step2/valid.json" {
     print("------------\n", .{});
@@ -484,19 +515,7 @@ test "paranthesis_checktest" {
     try std.testing.expect(foundInvalidError);
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const cwd_path = try std.fs.cwd().realpathAlloc(allocator, ".");
-    std.log.info("cwd: {s}", .{cwd_path});
-
-    const file = try std.fs.cwd().openFile("tests/step2/valid.json", .{});
-    const valid_json = try file.reader().readAllAlloc(allocator, 1024);
-    defer allocator.free(valid_json);
-    try parse_json(allocator, valid_json);
-}
+pub fn main() !void {}
 
 test "step1/invalid.json" {
     print("------------\n", .{});
