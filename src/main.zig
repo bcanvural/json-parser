@@ -64,6 +64,7 @@ fn process_string(str: []const u8, idx: *usize) !void {
 
     print("printing collected value: {s}\n", .{owned_str});
 }
+
 fn isNumber(str: []const u8) bool {
     var foundNumber = true;
     _ = std.fmt.parseInt(i64, str, 10) catch {
@@ -181,8 +182,6 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     printList(&tokenList);
     // checks
     try paranthesis_check(allocator, tokenList);
-    // try colon_check(tokenList);
-    // try comma_check(tokenList);
     try parseTokenList(allocator, &tokenList);
 }
 //generic append method that converts the memory error to parser error.
@@ -220,7 +219,7 @@ fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), id
             else => return ParserError.InvalidJsonError,
         }
     }
-    //second pass: we expect [], [item], [item,item], ... and so on
+    //second pass: we expect one of the following: [], [item], [item,item], ... and so on
     const listLen = list.items.len;
     if (listLen == 0) {
         return; //empty array is valid json
@@ -266,31 +265,6 @@ fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), id
         }
     }
     return;
-}
-
-test "custom/array1.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/custom/array1.json", .{});
-    const ally = std.testing.allocator;
-    const valid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(valid_json);
-    try parse_json(ally, valid_json);
-}
-test "custom/array2.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/custom/array2.json", .{});
-    const ally = std.testing.allocator;
-    const valid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(valid_json);
-    try parse_json(ally, valid_json);
-}
-test "custom/complex.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/custom/complex.json", .{});
-    const ally = std.testing.allocator;
-    const valid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(valid_json);
-    try parse_json(ally, valid_json);
 }
 
 fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) ParserError!void {
@@ -413,6 +387,30 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         }
     }
 }
+test "custom/array1.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/array1.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
+test "custom/array2.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/array2.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
+test "custom/complex.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/complex.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
 test "custom/invalid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/custom/invalid.json", .{});
@@ -473,7 +471,6 @@ test "step2/invalid.json" {
     };
     try std.testing.expect(err_returned);
 }
-//todo debug new parsing method
 fn parseTokenList(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token)) !void {
     if (tokenList.items.len == 0) {
         return ParserError.InvalidJsonError;
@@ -484,53 +481,6 @@ fn parseTokenList(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token)
         Token.ObjectOpen => try parseObject(allocator, tokenList, &idx),
         Token.ArrayOpen => try parseArray(allocator, tokenList, &idx),
         else => return ParserError.InvalidJsonError,
-    }
-}
-
-//a colon can start earliest 3rd token
-//a colon can only have a string field left of it.
-//a colon can have {, [, stringfield, numfield to the right of it
-fn colon_check(tokenList: std.ArrayList(Token)) !void {
-    const len = tokenList.items.len;
-    for (tokenList.items, 0..) |token, i| {
-        switch (token) {
-            Token.StringField, Token.NumField => {
-                if (i == 0 or i == len - 1) {
-                    return ParserError.InvalidJsonError;
-                }
-                //to the left or right, a token cannot exist it should've been a colon!
-                const left = tokenList.items[i - 1];
-                switch (left) {
-                    Token.StringField, Token.FalseField, Token.TrueField, Token.NullField => {
-                        return ParserError.InvalidJsonError;
-                    },
-                    else => {},
-                }
-                const right = tokenList.items[i + 1];
-                switch (right) {
-                    Token.StringField, Token.FalseField, Token.TrueField, Token.NullField, Token.ArrayOpen, Token.ObjectOpen => {
-                        return ParserError.InvalidJsonError;
-                    },
-                    else => {},
-                }
-            },
-            Token.Colon => {
-                if (i < 2 or i == len - 1) {
-                    return ParserError.InvalidJsonError;
-                }
-                const left = tokenList.items[i - 1];
-                const right = tokenList.items[i + 1];
-                switch (left) {
-                    Token.StringField => {},
-                    else => return ParserError.InvalidJsonError,
-                }
-                switch (right) {
-                    Token.ObjectOpen, Token.ArrayOpen, Token.StringField, Token.NumField, Token.NullField, Token.TrueField, Token.FalseField => {},
-                    else => return ParserError.InvalidJsonError,
-                }
-            },
-            else => continue,
-        }
     }
 }
 
