@@ -1,0 +1,75 @@
+{
+  "employee": {
+    "name": "John Smith",
+    "age": 30,
+    "department": {
+      "id": 101,
+      "name": "Tech",
+      "location": {
+        "id": 201,
+        "city": "San Francisco",
+        "state": "California",
+        "address": {
+          "street": "Baker",
+          "number": "221B",
+          "geolocation": {
+            "latitude": 37.7749,
+            "longitude": -122.4194,
+            "timezone": {
+              "zone": "Pacific Daylight Time",
+              "offset": "-07:00"
+            }
+          }
+        }
+      },
+      "projects": [
+        {
+          "id": 301,
+          "name": "Project X",
+          "status": "active",
+          "team": [
+            {
+              "id": 401,
+              "role": "developer",
+              "skills": [
+                {
+                  "id": 501,
+                  "name": "Java",
+                  "experience": "5 years"
+                },
+                {
+                  "id": 502,
+                  "name": "Python",
+                  "experience": "3 years"
+                }
+              ]
+            },
+            {
+              "id": 402,
+              "role": "UI/UX designer",
+              "skills": [
+                {
+                  "id": 503,
+                  "name": "Adobe XD",
+                  "experience": "4 years"
+                },
+                {
+                  "id": 504,
+                  "name": "Sketch",
+                  "experience": "2 years"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "contact": {
+      "email": "john@example.com",
+      "phone": {
+        "home": "123-456-7890",
+        "work": "098-765-4321"
+      }
+    }
+  }
+}

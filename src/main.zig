@@ -411,6 +411,14 @@ test "custom/complex.json" {
     defer ally.free(valid_json);
     try parse_json(ally, valid_json);
 }
+test "custom/real.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/real.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 10000);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
 test "custom/invalid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/custom/invalid.json", .{});
