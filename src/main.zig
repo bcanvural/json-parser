@@ -31,8 +31,7 @@ pub const ObjectParseToken = union(enum) {
 };
 
 pub const ArrayParseToken = union(enum) {
-    ObjectField,
-    ArrayField,
+    ArrayItem,
     Comma,
 };
 
@@ -186,7 +185,7 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     // try comma_check(tokenList);
     try parseTokenList(allocator, &tokenList);
 }
-//challenge: write an append method that converts the memory error. Make it generic
+//generic append method that converts the memory error to parser error.
 fn append(comptime T: type, list: *std.ArrayList(T), item: T) ParserError!void {
     list.append(item) catch {
         return ParserError.MemoryError;
@@ -197,23 +196,64 @@ fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), id
     const len = tokenList.items.len;
     var list = std.ArrayList(ArrayParseToken).init(allocator);
     defer list.deinit();
-    while (idx.* < len) {
+    loop: while (idx.* < len) {
         const token = tokenList.items[idx.*];
         idx.* += 1;
         switch (token) {
             Token.ObjectOpen => {
                 try parseObject(allocator, tokenList, idx);
-                try append(ArrayParseToken, &list, ArrayParseToken.ObjectField);
+                try append(ArrayParseToken, &list, ArrayParseToken.ArrayItem);
             },
             Token.Comma => try append(ArrayParseToken, &list, ArrayParseToken.Comma),
             Token.ArrayOpen => {
                 try parseArray(allocator, tokenList, idx);
-                try append(ArrayParseToken, &list, ArrayParseToken.ArrayField);
+                try append(ArrayParseToken, &list, ArrayParseToken.ArrayItem);
             },
+            Token.ArrayClose => {
+                print("In Array close\n", .{});
+                break :loop;
+            },
+
             else => return ParserError.InvalidJsonError,
         }
     }
+    //second pass: we expect [], [item], [item,item], ... and so on
+    const listLen = list.items.len;
+    if (listLen == 0) {
+        return; //empty array is valid json
+    }
+
+    var s_idx: usize = 0;
+
+    while (s_idx <= listLen - 1) {
+        const item = list.items[s_idx];
+        if (item != ArrayParseToken.ArrayItem) {
+            return ParserError.InvalidJsonError;
+        }
+        //should we check for comma? only if we are not the last item
+        if (s_idx != listLen - 1) {
+            const maybeComma = list.items[s_idx];
+            if (maybeComma != ArrayParseToken.Comma) {
+                return ParserError.InvalidJsonError;
+            }
+            s_idx += 2;
+        } else {
+            s_idx += 1;
+        }
+    }
+
+    //third pass, comma checks
+    //
     return;
+}
+
+test "step4/valid2.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step4/valid2.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
 }
 
 fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) ParserError!void {
@@ -221,7 +261,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
     var firstPassList = std.ArrayList(ObjectParseToken).init(allocator);
     defer firstPassList.deinit();
     //first pass: we make a pass and recursively resolve all tokens into key, value, comma or colon fields.
-    while (idx.* < len) {
+    loop: while (idx.* < len) {
         const token = tokenList.items[idx.*];
         idx.* += 1; // we increment by default, handle unique cases separately
         switch (token) {
@@ -254,7 +294,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
             },
             Token.ObjectClose => {
                 print("In Object close\n", .{});
-                continue;
+                break :loop;
             },
             Token.ArrayClose => {
                 print("in array close, this should never happen if parantheses are balanced", .{});
@@ -405,7 +445,7 @@ fn parseTokenList(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token)
     var idx: usize = 1;
     switch (first) {
         Token.ObjectOpen => try parseObject(allocator, tokenList, &idx),
-        // Token.ArrayOpen => try parseArray(tokenList, &idx),
+        Token.ArrayOpen => try parseArray(allocator, tokenList, &idx),
         else => return ParserError.InvalidJsonError,
     }
 }
@@ -606,14 +646,6 @@ test "step4/invalid.json" {
 test "step4/valid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step4/valid.json", .{});
-    const ally = std.testing.allocator;
-    const valid_json = try file.reader().readAllAlloc(ally, 1024);
-    defer ally.free(valid_json);
-    try parse_json(ally, valid_json);
-}
-test "step4/valid2.json" {
-    print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/step4/valid2.json", .{});
     const ally = std.testing.allocator;
     const valid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(valid_json);
