@@ -4,8 +4,9 @@ const char_collector = @import("char_collector.zig");
 const print = std.debug.print;
 const Stack = @import("stack.zig").Stack;
 
-const Error = error{
+const ParserError = error{
     InvalidJsonError,
+    MemoryError,
 };
 
 pub const Token = union(enum) {
@@ -57,7 +58,7 @@ fn process_string(str: []const u8, idx: *usize) !void {
     }
     if (!closed) {
         print("String was not closed\n", .{});
-        return Error.InvalidJsonError;
+        return ParserError.InvalidJsonError;
     }
     const owned_str = try cc.get();
     defer ally.free(owned_str);
@@ -101,7 +102,7 @@ fn process_value(str: []const u8, idx: *usize) !Token {
 
     if (!closed) {
         print("Value was not closed\n", .{});
-        return Error.InvalidJsonError;
+        return ParserError.InvalidJsonError;
     }
 
     const owned_str = try cc.get();
@@ -119,7 +120,7 @@ fn process_value(str: []const u8, idx: *usize) !Token {
     } else if (std.mem.eql(u8, owned_str, "null")) {
         return Token.NullField;
     } else {
-        return Error.InvalidJsonError;
+        return ParserError.InvalidJsonError;
     }
 }
 
@@ -145,7 +146,7 @@ fn printToken(token: Token) void {
 }
 pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     if (str.len == 0) {
-        return Error.InvalidJsonError;
+        return ParserError.InvalidJsonError;
     }
 
     var tokenList = std.ArrayList(Token).init(allocator);
@@ -185,8 +186,14 @@ pub fn parse_json(allocator: std.mem.Allocator, str: []u8) !void {
     // try comma_check(tokenList);
     try parseTokenList(allocator, &tokenList);
 }
+//challenge: write an append method that converts the memory error. Make it generic
+fn append(comptime T: type, list: *std.ArrayList(T), item: T) ParserError!void {
+    list.append(item) catch {
+        return ParserError.MemoryError;
+    };
+}
 
-fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) !void {
+fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) ParserError!void {
     const len = tokenList.items.len;
     var list = std.ArrayList(ArrayParseToken).init(allocator);
     defer list.deinit();
@@ -196,20 +203,20 @@ fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), id
         switch (token) {
             Token.ObjectOpen => {
                 try parseObject(allocator, tokenList, idx);
-                try list.append(ArrayParseToken.ObjectField);
+                try append(ArrayParseToken, &list, ArrayParseToken.ObjectField);
             },
-            Token.Comma => try list.append(ArrayParseToken.Comma),
+            Token.Comma => try append(ArrayParseToken, &list, ArrayParseToken.Comma),
             Token.ArrayOpen => {
                 try parseArray(allocator, tokenList, idx);
-                try list.append(ArrayParseToken.ArrayField);
+                try append(ArrayParseToken, &list, ArrayParseToken.ArrayField);
             },
-            else => return Error.InvalidJsonError,
+            else => return ParserError.InvalidJsonError,
         }
     }
     return;
 }
 
-fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) !void {
+fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) ParserError!void {
     const len = tokenList.items.len;
     var firstPassList = std.ArrayList(ObjectParseToken).init(allocator);
     defer firstPassList.deinit();
@@ -226,24 +233,24 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
                     if (r_index != len) {
                         const right = tokenList.items[r_index];
                         if (right == Token.Colon) {
-                            try firstPassList.append(ObjectParseToken.KeyField);
+                            try append(ObjectParseToken, &firstPassList, ObjectParseToken.KeyField);
                             continue;
                         }
                     }
                 }
-                try firstPassList.append(ObjectParseToken.ValueField);
+                try append(ObjectParseToken, &firstPassList, ObjectParseToken.ValueField);
             },
-            Token.Colon => try firstPassList.append(ObjectParseToken.Colon),
-            Token.Comma => try firstPassList.append(ObjectParseToken.Comma),
+            Token.Colon => try append(ObjectParseToken, &firstPassList, ObjectParseToken.Colon),
+            Token.Comma => try append(ObjectParseToken, &firstPassList, ObjectParseToken.Comma),
             Token.ArrayOpen => {
                 try parseArray(allocator, tokenList, idx);
                 //if we survived above we can add this as a value field!
-                try firstPassList.append(ObjectParseToken.ValueField);
+                try append(ObjectParseToken, &firstPassList, ObjectParseToken.ValueField);
             },
             Token.ObjectOpen => {
                 try parseObject(allocator, tokenList, idx);
                 //if we survived above  we can add this as a value field!
-                try firstPassList.append(ObjectParseToken.ValueField);
+                try append(ObjectParseToken, &firstPassList, ObjectParseToken.ValueField);
             },
             Token.ObjectClose => {
                 print("In Object close\n", .{});
@@ -251,7 +258,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
             },
             Token.ArrayClose => {
                 print("in array close, this should never happen if parantheses are balanced", .{});
-                return Error.InvalidJsonError;
+                return ParserError.InvalidJsonError;
             },
         }
     }
@@ -264,7 +271,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
     }
     if (firstPassListLen == 1 or firstPassListLen == 2) {
         //we can never have only 1 or 2, something's fishy
-        return Error.InvalidJsonError;
+        return ParserError.InvalidJsonError;
     }
     var s_idx: usize = 0;
 
@@ -272,25 +279,25 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         const key_idx = s_idx;
         const key = firstPassList.items[key_idx];
         if (key != ObjectParseToken.KeyField) {
-            return Error.InvalidJsonError;
+            return ParserError.InvalidJsonError;
         }
         //
         const colon_idx = key_idx + 1;
         if (colon_idx == firstPassListLen) {
-            return Error.InvalidJsonError;
+            return ParserError.InvalidJsonError;
         }
         const colon = firstPassList.items[colon_idx];
         if (colon != ObjectParseToken.Colon) {
-            return Error.InvalidJsonError;
+            return ParserError.InvalidJsonError;
         }
         //
         const value_idx = colon_idx + 1;
         if (value_idx == firstPassListLen) {
-            return Error.InvalidJsonError;
+            return ParserError.InvalidJsonError;
         }
         const value = firstPassList.items[s_idx + 2];
         if (value != ObjectParseToken.ValueField) {
-            return Error.InvalidJsonError;
+            return ParserError.InvalidJsonError;
         }
         //
         //should we check for comma?
@@ -299,7 +306,7 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
         if (s_idx + 7 <= firstPassListLen) {
             const comma = firstPassList.items[s_idx + 3];
             if (comma != ObjectParseToken.Comma) {
-                return Error.InvalidJsonError;
+                return ParserError.InvalidJsonError;
             }
             s_idx += 4;
         } else {
@@ -317,12 +324,12 @@ fn parseObject(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), i
                 const l_idx = tp_idx - 1;
                 const r_idx = tp_idx + 1;
                 if (l_idx < 0 or r_idx > firstPassListLen - 1) {
-                    return Error.InvalidJsonError;
+                    return ParserError.InvalidJsonError;
                 }
                 const left = firstPassList.items[l_idx];
                 const right = firstPassList.items[r_idx];
                 if (left != ObjectParseToken.ValueField and right != ObjectParseToken.KeyField) {
-                    return Error.InvalidJsonError;
+                    return ParserError.InvalidJsonError;
                 }
             },
             else => {},
@@ -337,7 +344,7 @@ test "custom/invalid.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
@@ -358,7 +365,7 @@ test "custom/colon5.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
@@ -371,7 +378,7 @@ test "custom/num.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
@@ -384,7 +391,7 @@ test "step2/invalid.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
@@ -392,14 +399,14 @@ test "step2/invalid.json" {
 //todo debug new parsing method
 fn parseTokenList(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token)) !void {
     if (tokenList.items.len == 0) {
-        return Error.InvalidJsonError;
+        return ParserError.InvalidJsonError;
     }
     const first = tokenList.items[0];
     var idx: usize = 1;
     switch (first) {
         Token.ObjectOpen => try parseObject(allocator, tokenList, &idx),
         // Token.ArrayOpen => try parseArray(tokenList, &idx),
-        else => return Error.InvalidJsonError,
+        else => return ParserError.InvalidJsonError,
     }
 }
 
@@ -412,37 +419,37 @@ fn colon_check(tokenList: std.ArrayList(Token)) !void {
         switch (token) {
             Token.StringField, Token.NumField => {
                 if (i == 0 or i == len - 1) {
-                    return Error.InvalidJsonError;
+                    return ParserError.InvalidJsonError;
                 }
                 //to the left or right, a token cannot exist it should've been a colon!
                 const left = tokenList.items[i - 1];
                 switch (left) {
                     Token.StringField, Token.FalseField, Token.TrueField, Token.NullField => {
-                        return Error.InvalidJsonError;
+                        return ParserError.InvalidJsonError;
                     },
                     else => {},
                 }
                 const right = tokenList.items[i + 1];
                 switch (right) {
                     Token.StringField, Token.FalseField, Token.TrueField, Token.NullField, Token.ArrayOpen, Token.ObjectOpen => {
-                        return Error.InvalidJsonError;
+                        return ParserError.InvalidJsonError;
                     },
                     else => {},
                 }
             },
             Token.Colon => {
                 if (i < 2 or i == len - 1) {
-                    return Error.InvalidJsonError;
+                    return ParserError.InvalidJsonError;
                 }
                 const left = tokenList.items[i - 1];
                 const right = tokenList.items[i + 1];
                 switch (left) {
                     Token.StringField => {},
-                    else => return Error.InvalidJsonError,
+                    else => return ParserError.InvalidJsonError,
                 }
                 switch (right) {
                     Token.ObjectOpen, Token.ArrayOpen, Token.StringField, Token.NumField, Token.NullField, Token.TrueField, Token.FalseField => {},
-                    else => return Error.InvalidJsonError,
+                    else => return ParserError.InvalidJsonError,
                 }
             },
             else => continue,
@@ -461,7 +468,7 @@ test "custom colons tests" {
         defer ally.free(invalid_json);
         var err_returned = false;
         parse_json(ally, invalid_json) catch |err| switch (err) {
-            Error.InvalidJsonError => err_returned = true,
+            ParserError.InvalidJsonError => err_returned = true,
             else => return err,
         };
         try std.testing.expect(err_returned);
@@ -478,7 +485,7 @@ fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Toke
             const popped = try st.pop();
             if (popped != Token.ObjectOpen) {
                 print("Unclosed object paranthesis\n", .{});
-                return Error.InvalidJsonError;
+                return ParserError.InvalidJsonError;
             }
         },
         Token.ArrayOpen => st.push(token),
@@ -486,14 +493,14 @@ fn paranthesis_check(allocator: std.mem.Allocator, tokenList: std.ArrayList(Toke
             const popped = try st.pop();
             if (popped != Token.ArrayOpen) {
                 print("Unclosed array paranthesis\n", .{});
-                return Error.InvalidJsonError;
+                return ParserError.InvalidJsonError;
             }
         },
         else => continue,
     };
     //stack can only have elements if the parantheses were unbalanced!
     if (!st.empty()) {
-        return Error.InvalidJsonError;
+        return ParserError.InvalidJsonError;
     }
 }
 
@@ -508,7 +515,7 @@ test "paranthesis_checktest" {
     try tokenList.append(Token.ArrayOpen);
     var foundInvalidError = false;
     _ = paranthesis_check(ally, tokenList) catch |err| switch (err) {
-        Error.InvalidJsonError => foundInvalidError = true,
+        ParserError.InvalidJsonError => foundInvalidError = true,
         else => {},
     };
 
@@ -525,7 +532,7 @@ test "step1/invalid.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
@@ -547,7 +554,7 @@ test "step2/invalid2.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
@@ -570,7 +577,7 @@ test "step3/invalid.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
@@ -591,7 +598,7 @@ test "step4/invalid.json" {
     defer ally.free(invalid_json);
     var err_returned = false;
     parse_json(ally, invalid_json) catch |err| switch (err) {
-        Error.InvalidJsonError => err_returned = true,
+        ParserError.InvalidJsonError => err_returned = true,
         else => return err,
     };
     try std.testing.expect(err_returned);
