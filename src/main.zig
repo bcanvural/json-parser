@@ -191,7 +191,7 @@ fn append(comptime T: type, list: *std.ArrayList(T), item: T) ParserError!void {
         return ParserError.MemoryError;
     };
 }
-
+//An array may contain objects, string, bools, arrays, numbers too!
 fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), idx: *usize) ParserError!void {
     const len = tokenList.items.len;
     var list = std.ArrayList(ArrayParseToken).init(allocator);
@@ -200,6 +200,9 @@ fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), id
         const token = tokenList.items[idx.*];
         idx.* += 1;
         switch (token) {
+            Token.StringField, Token.NumField, Token.TrueField, Token.FalseField, Token.NullField => {
+                try append(ArrayParseToken, &list, ArrayParseToken.ArrayItem);
+            },
             Token.ObjectOpen => {
                 try parseObject(allocator, tokenList, idx);
                 try append(ArrayParseToken, &list, ArrayParseToken.ArrayItem);
@@ -230,9 +233,9 @@ fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), id
         if (item != ArrayParseToken.ArrayItem) {
             return ParserError.InvalidJsonError;
         }
-        //should we check for comma? only if we are not the last item
+        //should we check for comma on the right? only if we are not the last item
         if (s_idx != listLen - 1) {
-            const maybeComma = list.items[s_idx];
+            const maybeComma = list.items[s_idx + 1];
             if (maybeComma != ArrayParseToken.Comma) {
                 return ParserError.InvalidJsonError;
             }
@@ -242,14 +245,48 @@ fn parseArray(allocator: std.mem.Allocator, tokenList: *std.ArrayList(Token), id
         }
     }
 
-    //third pass, comma checks
-    //
+    //third pass: make sure the commas are placed right.
+    //each comma must have an array item on both sides, no exceptions
+    for (list.items, 0..) |item, tp_idx| {
+        switch (item) {
+            ArrayParseToken.Comma => {
+                //bounds checks:
+                const l_idx = tp_idx - 1;
+                const r_idx = tp_idx + 1;
+                if (l_idx < 0 or r_idx > listLen - 1) {
+                    return ParserError.InvalidJsonError;
+                }
+                const left = list.items[l_idx];
+                const right = list.items[r_idx];
+                if (left != ArrayParseToken.ArrayItem and right != ArrayParseToken.ArrayItem) {
+                    return ParserError.InvalidJsonError;
+                }
+            },
+            else => {},
+        }
+    }
     return;
 }
 
-test "step4/valid2.json" {
+test "custom/array1.json" {
     print("------------\n", .{});
-    const file = try std.fs.cwd().openFile("tests/step4/valid2.json", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/array1.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
+test "custom/array2.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/array2.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
+test "custom/complex.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/custom/complex.json", .{});
     const ally = std.testing.allocator;
     const valid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(valid_json);
@@ -646,6 +683,14 @@ test "step4/invalid.json" {
 test "step4/valid.json" {
     print("------------\n", .{});
     const file = try std.fs.cwd().openFile("tests/step4/valid.json", .{});
+    const ally = std.testing.allocator;
+    const valid_json = try file.reader().readAllAlloc(ally, 1024);
+    defer ally.free(valid_json);
+    try parse_json(ally, valid_json);
+}
+test "step4/valid2.json" {
+    print("------------\n", .{});
+    const file = try std.fs.cwd().openFile("tests/step4/valid2.json", .{});
     const ally = std.testing.allocator;
     const valid_json = try file.reader().readAllAlloc(ally, 1024);
     defer ally.free(valid_json);
